@@ -1,0 +1,63 @@
+{
+  "name": "mediagrab-desktop",
+  "version": "1.0.0",
+  "description": "MediaGrab — Download YouTube, Spotify & YouTube Music",
+  "main": "main.js",
+  "author": "Parth-360",
+  "license": "MIT",
+  "scripts": {
+    "start":       "electron .",
+    "build:mac":   "electron-builder --mac --x64 --arm64",
+    "build:win":   "electron-builder --win --x64",
+    "build:linux": "electron-builder --linux --x64",
+    "build:all":   "electron-builder --mac --win --linux"
+  },
+  "build": {
+    "appId": "com.mediagrab.desktop",
+    "productName": "MediaGrab",
+    "copyright": "Copyright © 2024 Parth-360",
+    "directories": {
+      "output": "../desktop-dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web-build",
+        "to":   "web-build",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "../assets/icon.png",
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ]
+    },
+    "win": {
+      "icon": "../assets/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "linux": {
+      "icon": "../assets/icon.png",
+      "category": "AudioVideo",
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick":         false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron":         "^32.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

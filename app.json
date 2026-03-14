@@ -55,10 +55,6 @@
         }
       ]
     ],
-    "extra": {
-      "eas": {
-        "projectId": "mediagrab-local-build"
-      }
-    }
+    "extra": {}
   }
 }
