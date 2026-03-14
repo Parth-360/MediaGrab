@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "MediaGrab",
+    "slug": "MediaGrab",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#121212"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mediagrab.app"
+    },
+    "android": {
+      "package": "com.mediagrab.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#121212",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "blockedPermissions": [],
+      "softwareKeyboardLayoutMode": "pan",
+      "allowBackup": true,
+      "config": {
+        "targetSdkVersion": 34,
+        "minSdkVersion": 26
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow MediaGrab to save downloaded media to your gallery.",
+          "savePhotosPermission": "Allow MediaGrab to save downloaded media to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "mediagrab-local-build"
+      }
+    }
+  }
+}
