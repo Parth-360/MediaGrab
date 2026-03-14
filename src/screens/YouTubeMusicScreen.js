@@ -3,21 +3,24 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Image,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons }       from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS } from '../theme/colors';
-import SearchBar from '../components/SearchBar';
+import { COLORS }         from '../theme/colors';
+import SearchBar        from '../components/SearchBar';
+import VideoDetailSheet from '../components/VideoDetailSheet';
 import { searchYouTubeMusic, getYouTubeMusicCharts } from '../services/youtubeMusicService';
 import { resolveYTMusicUrl } from '../services/streamResolver';
-import { startDownload }    from '../services/downloadService';
-import { useSearchHistory } from '../store/downloadStore';
-import { formatDuration }   from '../utils/helpers';
+import { startDownload }     from '../services/downloadService';
+import { useSearchHistory }  from '../store/downloadStore';
+import { formatDuration }    from '../utils/helpers';
 
 export default function YouTubeMusicScreen({ navigation }) {
-  const [results,  setResults]  = useState([]);
-  const [loading,  setLoading]  = useState(false);
-  const [query,    setQuery]    = useState('');
-  const [dlId,     setDlId]     = useState(null);
+  const [results,       setResults]       = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [query,         setQuery]         = useState('');
+  const [selectedTrack, setSelectedTrack] = useState(null);
+  const [showSheet,     setShowSheet]     = useState(false);
+  const [sheetLoading,  setSheetLoading]  = useState(false);
   const { addToHistory } = useSearchHistory();
 
   useEffect(() => { loadCharts(); }, []);
@@ -44,41 +47,56 @@ export default function YouTubeMusicScreen({ navigation }) {
     setLoading(false);
   }, [addToHistory]);
 
-  const handleDownload = async (track) => {
-    setDlId(track.id);
+  // Tap a track → open preview sheet
+  const handleTrackTap = (track) => {
+    setSelectedTrack(track);
+    setSheetLoading(false);
+    setShowSheet(true);
+  };
+
+  const closeSheet = () => {
+    if (!sheetLoading) setShowSheet(false);
+  };
+
+  // Called from the sheet's "Download MP3" button
+  const handleDownload = async (quality) => {
+    if (!selectedTrack) return;
+    setSheetLoading(true);
+
     try {
-      const resolved = await resolveYTMusicUrl(track.id);
-      if (!resolved?.url) throw new Error('Could not get download link.');
+      const resolved = await resolveYTMusicUrl(selectedTrack.id);
+      if (!resolved?.url) throw new Error('Could not get download link. Please try again.');
 
       await startDownload({
-        title:     track.title,
+        title:     selectedTrack.title,
         url:       resolved.url,
         type:      'audio',
-        quality:   '320 kbps MP3',
+        quality:   quality?.label || '320 kbps MP3',
         source:    'youtubeMusic',
-        thumbnail: track.albumArt || track.thumbnail,
-        artist:    track.artist,
-        album:     track.album || '',
+        thumbnail: selectedTrack.albumArt || selectedTrack.thumbnail,
+        artist:    selectedTrack.artist,
+        album:     selectedTrack.album || '',
       });
 
+      setShowSheet(false);
       Alert.alert(
         '✅ Download Started!',
-        `"${track.title}" by ${track.artist}\n320 kbps MP3`,
+        `"${selectedTrack.title}" by ${selectedTrack.artist}\n320 kbps MP3`,
         [
           { text: 'My Downloads', onPress: () => navigation.navigate('Downloads') },
           { text: 'OK' },
         ],
       );
     } catch (e) {
+      setSheetLoading(false);
       Alert.alert('Download Failed', e.message);
     }
-    setDlId(null);
   };
 
   const renderTrack = ({ item }) => (
     <TouchableOpacity
       style={styles.trackCard}
-      onPress={() => handleDownload(item)}
+      onPress={() => handleTrackTap(item)}
       activeOpacity={0.7}
     >
       <Image
@@ -93,15 +111,10 @@ export default function YouTubeMusicScreen({ navigation }) {
           <Text style={styles.trackDuration}>{formatDuration(item.duration)}</Text>
         )}
       </View>
-      {dlId === item.id ? (
-        <View style={styles.dlBtn}>
-          <ActivityIndicator size="small" color={COLORS.primary} />
-        </View>
-      ) : (
-        <TouchableOpacity style={styles.dlBtn} onPress={() => handleDownload(item)}>
-          <Ionicons name="download-outline" size={22} color={COLORS.primary} />
-        </TouchableOpacity>
-      )}
+      {/* Eye icon hints the card is tappable for a preview */}
+      <View style={styles.previewBtn}>
+        <Ionicons name="play-circle-outline" size={26} color={COLORS.primary} />
+      </View>
     </TouchableOpacity>
   );
 
@@ -120,7 +133,7 @@ export default function YouTubeMusicScreen({ navigation }) {
               <View style={styles.heroContent}>
                 <Ionicons name="musical-note" size={36} color="#FFF" />
                 <Text style={styles.heroTitle}>YouTube Music</Text>
-                <Text style={styles.heroSub}>Download any song — 320 kbps MP3</Text>
+                <Text style={styles.heroSub}>Download any song — high quality MP3</Text>
               </View>
             </LinearGradient>
 
@@ -131,7 +144,7 @@ export default function YouTubeMusicScreen({ navigation }) {
             />
 
             <Text style={styles.hint}>
-              💡 Tap any track or the download icon to save it
+              💡 Tap any track to preview and download it
             </Text>
 
             <Text style={styles.sectionLabel}>
@@ -162,6 +175,16 @@ export default function YouTubeMusicScreen({ navigation }) {
           </Text>
         </View>
       )}
+
+      {/* Preview + download sheet */}
+      <VideoDetailSheet
+        visible={showSheet}
+        onClose={closeSheet}
+        onDownload={handleDownload}
+        media={selectedTrack}
+        showVideoOptions={false}
+        loading={sheetLoading}
+      />
     </View>
   );
 }
@@ -181,7 +204,7 @@ const styles = StyleSheet.create({
   trackTitle:   { color: COLORS.textPrimary, fontSize: 14, fontWeight: '600' },
   trackArtist:  { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   trackDuration:{ color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
-  dlBtn:        { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  previewBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   empty:        { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 40 },
   emptyTitle:   { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
   emptyText:    { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },

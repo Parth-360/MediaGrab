@@ -52,7 +52,7 @@ export async function startDownload({
   }
 
   const id        = generateUniqueId();
-  const extension = type === 'video' ? 'mp4' : 'm4a';
+  const extension = type === 'video' ? 'mp4' : 'mp3';
   const filename  = sanitizeFilename(`${title}.${extension}`);
   const filePath  = DOWNLOAD_DIR + filename;
 
@@ -101,12 +101,9 @@ async function _runDownload(id) {
       item.filePath,
       {
         headers: {
-          // Needed for YouTube stream URLs to accept range requests
-          'Range':             'bytes=0-',
-          'User-Agent':        'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-          'Accept':            '*/*',
-          'Accept-Encoding':   'identity',
-          'Connection':        'keep-alive',
+          // Standard browser headers — compatible with loader.to CDN URLs
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 11; SM-G780G) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+          'Accept':     '*/*',
         },
         sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
       },

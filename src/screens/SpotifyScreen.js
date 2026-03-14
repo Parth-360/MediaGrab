@@ -4,9 +4,10 @@ import {
   ActivityIndicator, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme/colors';
-import SearchBar from '../components/SearchBar';
-import TrackCard from '../components/TrackCard';
+import { COLORS }   from '../theme/colors';
+import SearchBar        from '../components/SearchBar';
+import TrackCard        from '../components/TrackCard';
+import VideoDetailSheet from '../components/VideoDetailSheet';
 import {
   searchSpotifyTracks, findAndResolveDownload, hasCredentials,
 } from '../services/spotifyService';
@@ -14,10 +15,12 @@ import { startDownload }    from '../services/downloadService';
 import { useSearchHistory } from '../store/downloadStore';
 
 export default function SpotifyScreen({ navigation }) {
-  const [results,    setResults]    = useState([]);
-  const [loading,    setLoading]    = useState(false);
-  const [query,      setQuery]      = useState('');
-  const [dlId,       setDlId]       = useState(null);     // track being downloaded
+  const [results,       setResults]       = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [query,         setQuery]         = useState('');
+  const [selectedTrack, setSelectedTrack] = useState(null);
+  const [showSheet,     setShowSheet]     = useState(false);
+  const [sheetLoading,  setSheetLoading]  = useState(false);
   const { addToHistory } = useSearchHistory();
 
   const handleSearch = useCallback(async (q) => {
@@ -47,34 +50,54 @@ export default function SpotifyScreen({ navigation }) {
     setLoading(false);
   }, [addToHistory, navigation]);
 
-  const handleDownload = async (track) => {
-    setDlId(track.id);
+  // Tap a track card → open the preview sheet
+  const handleTrackTap = (track) => {
+    setSelectedTrack(track);
+    setSheetLoading(false);
+    setShowSheet(true);
+  };
+
+  const closeSheet = () => {
+    if (!sheetLoading) setShowSheet(false);
+  };
+
+  // Called when user taps "Download MP3" in the sheet
+  const handleDownload = async (quality) => {
+    if (!selectedTrack) return;
+    setSheetLoading(true);
+
     try {
-      const source = await findAndResolveDownload(track);
+      // findAndResolveDownload searches YouTube for the track,
+      // then calls resolveAudioUrl (loader.to) to get the MP3 link
+      const source = await findAndResolveDownload(selectedTrack);
 
       await startDownload({
-        title:     track.title,
+        title:     selectedTrack.title,
         url:       source.url,
         type:      'audio',
-        quality:   source.quality,
+        quality:   quality?.label || '320 kbps MP3',
         source:    'spotify',
-        thumbnail: track.albumArt,
-        artist:    track.artist,
-        album:     track.album,
+        thumbnail: selectedTrack.albumArt,
+        artist:    selectedTrack.artist,
+        album:     selectedTrack.album,
       });
 
+      setShowSheet(false);
       Alert.alert(
         '✅ Download Started!',
-        `"${track.title}" by ${track.artist}\n320 kbps MP3`,
+        `"${selectedTrack.title}" by ${selectedTrack.artist}\n320 kbps MP3`,
         [
           { text: 'My Downloads', onPress: () => navigation.navigate('Downloads') },
           { text: 'OK' },
         ],
       );
     } catch (e) {
-      Alert.alert('Download Failed', e.message + '\n\nTip: Try a different search or check your connection.');
+      setSheetLoading(false);
+      Alert.alert(
+        'Download Failed',
+        e.message + '\n\nTip: Try a different search or check your connection.',
+      );
     }
-    setDlId(null);
   };
 
   return (
@@ -83,19 +106,11 @@ export default function SpotifyScreen({ navigation }) {
         data={results}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <View>
-            <TrackCard
-              track={item}
-              onPress={handleDownload}
-              onDownload={handleDownload}
-            />
-            {dlId === item.id && (
-              <View style={styles.dlStatus}>
-                <ActivityIndicator size="small" color={COLORS.primary} />
-                <Text style={styles.dlStatusText}>Finding best audio source…</Text>
-              </View>
-            )}
-          </View>
+          <TrackCard
+            track={item}
+            onPress={handleTrackTap}
+            onDownload={handleTrackTap}
+          />
         )}
         ListHeaderComponent={
           <View>
@@ -128,7 +143,7 @@ export default function SpotifyScreen({ navigation }) {
             )}
 
             <Text style={styles.hint}>
-              💡 Tap any track to download it as a 320 kbps MP3
+              💡 Tap any track to preview and download as a high-quality MP3
             </Text>
 
             {query.length > 0 && (
@@ -161,6 +176,16 @@ export default function SpotifyScreen({ navigation }) {
           <Text style={styles.overlayText}>Searching Spotify…</Text>
         </View>
       )}
+
+      {/* Preview sheet — audio-only mode (no video tabs) */}
+      <VideoDetailSheet
+        visible={showSheet}
+        onClose={closeSheet}
+        onDownload={handleDownload}
+        media={selectedTrack}
+        showVideoOptions={false}
+        loading={sheetLoading}
+      />
     </View>
   );
 }
@@ -176,8 +201,6 @@ const styles = StyleSheet.create({
   bannerDesc:   { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   hint:         { color: COLORS.textMuted, fontSize: 12, paddingHorizontal: 20, paddingBottom: 4, fontStyle: 'italic' },
   sectionLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', paddingHorizontal: 20, paddingVertical: 8 },
-  dlStatus:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 8 },
-  dlStatusText: { color: COLORS.textSecondary, fontSize: 12 },
   empty:        { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 40 },
   emptyTitle:   { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
   emptyText:    { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },
