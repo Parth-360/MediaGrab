@@ -8,28 +8,28 @@ import { COLORS } from '../theme/colors';
 import SearchBar    from '../components/SearchBar';
 import VideoCard    from '../components/VideoCard';
 import QualityModal from '../components/QualityModal';
-import {
-  searchYouTube, getVideoInfo, getTrending,
-  getBestAudioStream, getVideoStreamByHeight,
-} from '../services/youtubeService';
+import { searchYouTube, getTrending, getVideoMeta, extractVideoId } from '../services/youtubeService';
+import { resolveAudioUrl, resolveVideoUrl } from '../services/streamResolver';
 import { startDownload }    from '../services/downloadService';
 import { useSearchHistory } from '../store/downloadStore';
-import { extractVideoId }   from '../utils/helpers';
 
 export default function YouTubeScreen({ navigation }) {
-  const [results,     setResults]     = useState([]);
-  const [loading,     setLoading]     = useState(false);
-  const [query,       setQuery]       = useState('');
-  const [videoInfo,   setVideoInfo]   = useState(null);
-  const [showModal,   setShowModal]   = useState(false);
-  const [infoLoading, setInfoLoading] = useState(false);
+  const [results,      setResults]      = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [query,        setQuery]        = useState('');
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [showModal,    setShowModal]    = useState(false);
+  const [resolving,    setResolving]    = useState(false);
   const { addToHistory } = useSearchHistory();
 
   useEffect(() => { loadTrending(); }, []);
 
   const loadTrending = async () => {
     setLoading(true);
-    try { setResults(await getTrending()); } catch (_) {}
+    try {
+      const trending = await getTrending();
+      setResults(trending);
+    } catch (_) {}
     setLoading(false);
   };
 
@@ -39,55 +39,68 @@ export default function YouTubeScreen({ navigation }) {
     try {
       const vid = extractVideoId(q);
       if (vid) {
-        const info = await getVideoInfo(vid);
-        setResults([{
-          id: vid, title: info.title, thumbnail: info.thumbnail,
-          duration: info.duration, views: info.views, uploaderName: info.uploaderName,
-        }]);
+        // Direct URL pasted — get metadata and show
+        const meta = await getVideoMeta(vid);
+        setResults([meta]);
       } else {
-        setResults(await searchYouTube(q));
+        const found = await searchYouTube(q);
+        if (found.length === 0) {
+          Alert.alert('No Results', `Nothing found for "${q}". Try different keywords.`);
+        }
+        setResults(found);
         addToHistory(q, 'youtube');
       }
-    } catch (e) { Alert.alert('Search Error', e.message); }
+    } catch (e) {
+      Alert.alert('Search Error', e.message);
+    }
     setLoading(false);
   }, [addToHistory]);
 
-  const openQualityPicker = async (video) => {
-    setInfoLoading(true);
-    try {
-      const info = await getVideoInfo(video.id);
-      setVideoInfo(info);
-      setShowModal(true);
-    } catch (e) { Alert.alert('Error', e.message); }
-    setInfoLoading(false);
+  // Tap a result → show quality picker
+  const handleVideoTap = (video) => {
+    setSelectedVideo(video);
+    setShowModal(true);
   };
 
   const handleQualitySelect = async (quality) => {
     setShowModal(false);
-    if (!videoInfo) return;
-    let streamUrl = null;
+    if (!selectedVideo) return;
 
-    if (quality.type === 'audio') {
-      const stream = getBestAudioStream(videoInfo.audioStreams);
-      if (!stream?.url) { Alert.alert('Error', 'No audio stream available.'); return; }
-      streamUrl = stream.url;
-    } else {
-      const height = parseInt(quality.value, 10);
-      const stream = getVideoStreamByHeight(videoInfo.videoStreams, height);
-      if (!stream?.url) { Alert.alert('Error', 'No video stream at this quality.'); return; }
-      streamUrl = stream.url;
-    }
-
+    setResolving(true);
     try {
+      let resolved;
+
+      if (quality.type === 'audio') {
+        // Audio only — highest quality MP3
+        resolved = await resolveAudioUrl(selectedVideo.id, '320');
+      } else {
+        // Video + audio combined
+        resolved = await resolveVideoUrl(selectedVideo.id, quality.value);
+      }
+
+      if (!resolved?.url) throw new Error('Could not get download link.');
+
       await startDownload({
-        title: videoInfo.title, url: streamUrl, type: quality.type,
-        quality: quality.label, source: 'youtube', thumbnail: videoInfo.thumbnail,
+        title:     selectedVideo.title,
+        url:       resolved.url,
+        type:      quality.type,
+        quality:   quality.label,
+        source:    'youtube',
+        thumbnail: selectedVideo.thumbnail,
       });
-      Alert.alert('✅ Download Started', `"${videoInfo.title}" — ${quality.label}`, [
-        { text: 'View Downloads', onPress: () => navigation.navigate('Downloads') },
-        { text: 'OK' },
-      ]);
-    } catch (e) { Alert.alert('Download Error', e.message); }
+
+      Alert.alert(
+        '✅ Download Started!',
+        `"${selectedVideo.title}"\n${quality.label}`,
+        [
+          { text: 'My Downloads', onPress: () => navigation.navigate('Downloads') },
+          { text: 'OK' },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Download Failed', e.message + '\n\nTip: Make sure you have a stable internet connection.');
+    }
+    setResolving(false);
   };
 
   return (
@@ -96,7 +109,11 @@ export default function YouTubeScreen({ navigation }) {
         data={results}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <VideoCard video={item} onPress={openQualityPicker} onDownload={openQualityPicker} />
+          <VideoCard
+            video={item}
+            onPress={handleVideoTap}
+            onDownload={handleVideoTap}
+          />
         )}
         ListHeaderComponent={
           <View>
@@ -110,21 +127,32 @@ export default function YouTubeScreen({ navigation }) {
               </View>
               <View style={{ width: 40 }} />
             </View>
+
             <SearchBar
-              placeholder="Search or paste YouTube URL…"
+              placeholder="Search or paste YouTube link…"
               onSearch={handleSearch}
               onClear={() => { setQuery(''); loadTrending(); }}
             />
+
+            <Text style={styles.hint}>
+              💡 Tap any video → choose Video (1080p/720p) or Audio (320kbps MP3)
+            </Text>
+
             <Text style={styles.sectionLabel}>
-              {query ? `${results.length} results for "${query}"` : 'Trending Now 🔥'}
+              {query
+                ? `${results.length} result${results.length !== 1 ? 's' : ''} for "${query}"`
+                : '🔥 Trending Now'}
             </Text>
           </View>
         }
         ListEmptyComponent={
           !loading ? (
             <View style={styles.empty}>
-              <Ionicons name="search-outline" size={60} color={COLORS.textMuted} />
-              <Text style={styles.emptyText}>Search YouTube or paste a video link</Text>
+              <Ionicons name="search-outline" size={64} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>Search YouTube</Text>
+              <Text style={styles.emptyText}>
+                Search by name or paste a YouTube link to download
+              </Text>
             </View>
           ) : null
         }
@@ -132,12 +160,16 @@ export default function YouTubeScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       />
 
-      {(loading || infoLoading) && (
+      {/* Loading overlay */}
+      {(loading || resolving) && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.overlayText}>
-            {infoLoading ? 'Loading streams…' : 'Searching…'}
+            {resolving ? '⏳ Getting download link…' : 'Searching YouTube…'}
           </Text>
+          {resolving && (
+            <Text style={styles.overlaySubText}>This takes a few seconds</Text>
+          )}
         </View>
       )}
 
@@ -145,7 +177,7 @@ export default function YouTubeScreen({ navigation }) {
         visible={showModal}
         onClose={() => setShowModal(false)}
         onSelect={handleQualitySelect}
-        title={videoInfo?.title}
+        title={selectedVideo?.title}
         showVideoOptions={true}
       />
     </View>
@@ -153,14 +185,17 @@ export default function YouTubeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: COLORS.background },
-  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 8 },
-  backBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
-  titleRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle:  { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
-  sectionLabel: { color: COLORS.textSecondary, fontSize: 13, paddingHorizontal: 20, paddingVertical: 8 },
-  empty:        { alignItems: 'center', paddingTop: 80, gap: 16 },
-  emptyText:    { color: COLORS.textMuted, fontSize: 16, textAlign: 'center', paddingHorizontal: 40 },
-  overlay:      { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  overlayText:  { color: COLORS.textPrimary, fontSize: 14 },
+  container:      { flex: 1, backgroundColor: COLORS.background },
+  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 8 },
+  backBtn:        { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  titleRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle:    { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
+  hint:           { color: COLORS.textMuted, fontSize: 12, paddingHorizontal: 20, paddingTop: 4, fontStyle: 'italic' },
+  sectionLabel:   { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', paddingHorizontal: 20, paddingVertical: 10 },
+  empty:          { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 40 },
+  emptyTitle:     { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
+  emptyText:      { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },
+  overlay:        { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  overlayText:    { color: COLORS.textPrimary, fontSize: 16, fontWeight: '600' },
+  overlaySubText: { color: COLORS.textSecondary, fontSize: 13 },
 });

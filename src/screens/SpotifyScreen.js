@@ -5,29 +5,26 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme/colors';
-import SearchBar    from '../components/SearchBar';
-import TrackCard    from '../components/TrackCard';
-import QualityModal from '../components/QualityModal';
+import SearchBar from '../components/SearchBar';
+import TrackCard from '../components/TrackCard';
 import {
-  searchSpotifyTracks, findDownloadSource, hasCredentials,
+  searchSpotifyTracks, findAndResolveDownload, hasCredentials,
 } from '../services/spotifyService';
 import { startDownload }    from '../services/downloadService';
 import { useSearchHistory } from '../store/downloadStore';
 
 export default function SpotifyScreen({ navigation }) {
-  const [results,      setResults]      = useState([]);
-  const [loading,      setLoading]      = useState(false);
-  const [query,        setQuery]        = useState('');
-  const [selectedTrack, setSelectedTrack] = useState(null);
-  const [showModal,    setShowModal]    = useState(false);
-  const [sourcingId,   setSourcingId]   = useState(null);
+  const [results,    setResults]    = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [query,      setQuery]      = useState('');
+  const [dlId,       setDlId]       = useState(null);     // track being downloaded
   const { addToHistory } = useSearchHistory();
 
   const handleSearch = useCallback(async (q) => {
     if (!hasCredentials()) {
       Alert.alert(
         '⚙️ Spotify Setup Required',
-        'Add your free Spotify API credentials in Settings.\n\n1. Visit developer.spotify.com\n2. Create an app (free)\n3. Copy Client ID & Secret\n4. Paste in Settings',
+        '1. Go to developer.spotify.com\n2. Create a free app\n3. Copy Client ID & Secret\n4. Paste in Settings',
         [
           { text: 'Open Settings', onPress: () => navigation.navigate('Settings') },
           { text: 'Cancel' },
@@ -38,44 +35,46 @@ export default function SpotifyScreen({ navigation }) {
     setQuery(q);
     setLoading(true);
     try {
-      setResults(await searchSpotifyTracks(q));
+      const found = await searchSpotifyTracks(q);
+      if (found.length === 0) {
+        Alert.alert('No Results', `Nothing found for "${q}". Try different keywords.`);
+      }
+      setResults(found);
       addToHistory(q, 'spotify');
-    } catch (e) { Alert.alert('Search Error', e.message); }
+    } catch (e) {
+      Alert.alert('Search Error', e.message);
+    }
     setLoading(false);
   }, [addToHistory, navigation]);
 
-  const handleDownloadPress = (track) => {
-    setSelectedTrack(track);
-    setShowModal(true);
-  };
-
-  const handleQualitySelect = async (quality) => {
-    setShowModal(false);
-    if (!selectedTrack) return;
-
-    setSourcingId(selectedTrack.id);
+  const handleDownload = async (track) => {
+    setDlId(track.id);
     try {
-      const source = await findDownloadSource(selectedTrack);
+      const source = await findAndResolveDownload(track);
+
       await startDownload({
-        title:     selectedTrack.title,
-        url:       source.streamUrl,
+        title:     track.title,
+        url:       source.url,
         type:      'audio',
-        quality:   `${quality.label} (via YouTube)`,
+        quality:   source.quality,
         source:    'spotify',
-        thumbnail: selectedTrack.albumArt,
-        artist:    selectedTrack.artist,
-        album:     selectedTrack.album,
+        thumbnail: track.albumArt,
+        artist:    track.artist,
+        album:     track.album,
       });
+
       Alert.alert(
-        '✅ Download Started',
-        `"${selectedTrack.title}" by ${selectedTrack.artist}`,
+        '✅ Download Started!',
+        `"${track.title}" by ${track.artist}\n320 kbps MP3`,
         [
-          { text: 'View Downloads', onPress: () => navigation.navigate('Downloads') },
+          { text: 'My Downloads', onPress: () => navigation.navigate('Downloads') },
           { text: 'OK' },
         ],
       );
-    } catch (e) { Alert.alert('Download Error', e.message); }
-    setSourcingId(null);
+    } catch (e) {
+      Alert.alert('Download Failed', e.message + '\n\nTip: Try a different search or check your connection.');
+    }
+    setDlId(null);
   };
 
   return (
@@ -85,11 +84,15 @@ export default function SpotifyScreen({ navigation }) {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View>
-            <TrackCard track={item} onPress={handleDownloadPress} onDownload={handleDownloadPress} />
-            {sourcingId === item.id && (
-              <View style={styles.sourcing}>
+            <TrackCard
+              track={item}
+              onPress={handleDownload}
+              onDownload={handleDownload}
+            />
+            {dlId === item.id && (
+              <View style={styles.dlStatus}>
                 <ActivityIndicator size="small" color={COLORS.primary} />
-                <Text style={styles.sourcingText}>Finding best audio source…</Text>
+                <Text style={styles.dlStatusText}>Finding best audio source…</Text>
               </View>
             )}
           </View>
@@ -118,25 +121,32 @@ export default function SpotifyScreen({ navigation }) {
                 <Ionicons name="key-outline" size={20} color={COLORS.warning} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.bannerTitle}>Setup Required</Text>
-                  <Text style={styles.bannerDesc}>Tap to add Spotify API credentials in Settings</Text>
+                  <Text style={styles.bannerDesc}>Tap here to add your free Spotify API credentials</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
               </TouchableOpacity>
             )}
 
+            <Text style={styles.hint}>
+              💡 Tap any track to download it as a 320 kbps MP3
+            </Text>
+
             {query.length > 0 && (
-              <Text style={styles.sectionLabel}>{results.length} results for "{query}"</Text>
+              <Text style={styles.sectionLabel}>
+                {results.length} result{results.length !== 1 ? 's' : ''} for "{query}"
+              </Text>
             )}
           </View>
         }
         ListEmptyComponent={
           !loading ? (
             <View style={styles.empty}>
-              <Ionicons name="musical-notes-outline" size={60} color={COLORS.textMuted} />
+              <Ionicons name="musical-notes-outline" size={64} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>Search Spotify</Text>
               <Text style={styles.emptyText}>
                 {hasCredentials()
-                  ? 'Search for songs, artists or albums'
-                  : 'Configure Spotify in Settings to start downloading'}
+                  ? 'Search for any song, artist or album'
+                  : 'Add Spotify credentials in Settings first'}
               </Text>
             </View>
           ) : null
@@ -151,14 +161,6 @@ export default function SpotifyScreen({ navigation }) {
           <Text style={styles.overlayText}>Searching Spotify…</Text>
         </View>
       )}
-
-      <QualityModal
-        visible={showModal}
-        onClose={() => setShowModal(false)}
-        onSelect={handleQualitySelect}
-        title={selectedTrack?.title}
-        showVideoOptions={false}
-      />
     </View>
   );
 }
@@ -172,11 +174,13 @@ const styles = StyleSheet.create({
   banner:       { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.warning + '15', margin: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: COLORS.warning + '30', gap: 12 },
   bannerTitle:  { color: COLORS.warning, fontSize: 14, fontWeight: '700' },
   bannerDesc:   { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
-  sectionLabel: { color: COLORS.textSecondary, fontSize: 13, paddingHorizontal: 20, paddingVertical: 8 },
-  sourcing:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 8, gap: 8 },
-  sourcingText: { color: COLORS.textSecondary, fontSize: 12 },
-  empty:        { alignItems: 'center', paddingTop: 80, gap: 16 },
-  emptyText:    { color: COLORS.textMuted, fontSize: 16, textAlign: 'center', paddingHorizontal: 40 },
-  overlay:      { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  overlayText:  { color: COLORS.textPrimary, fontSize: 14 },
+  hint:         { color: COLORS.textMuted, fontSize: 12, paddingHorizontal: 20, paddingBottom: 4, fontStyle: 'italic' },
+  sectionLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', paddingHorizontal: 20, paddingVertical: 8 },
+  dlStatus:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  dlStatusText: { color: COLORS.textSecondary, fontSize: 12 },
+  empty:        { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 40 },
+  emptyTitle:   { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
+  emptyText:    { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },
+  overlay:      { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  overlayText:  { color: COLORS.textPrimary, fontSize: 16, fontWeight: '600' },
 });
